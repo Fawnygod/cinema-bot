@@ -34,12 +34,6 @@ def start(message):
         types.InlineKeyboardButton("Аніме ⛩", callback_data="type_anime")
     )
     # Примусово видаляємо старе нижнє меню за допомогою ReplyKeyboardRemove
-    bot.send_message(
-        chat_id, 
-        "🎬 **Що сьогодні подивимось?**", 
-        parse_mode="Markdown", 
-        reply_markup=types.ReplyKeyboardRemove()
-    )
     bot.send_message(chat_id, "Оберіть категорію:", reply_markup=markup)
 
 # Обробник для старих кнопок нижнього меню (якщо вони ще активні у юзера)
@@ -62,7 +56,7 @@ def handle_query(call):
     elif call.data.startswith("genre_"):
         g_id = call.data.split("_")[1]
         user_selection[chat_id]['genre_id'] = None if g_id == "any" else g_id
-        bot.send_message(chat_id, "📅 **Напишіть рік (напр. 2025):**\n_Або надішліть будь-що інше для пошуку за весь час_")
+        bot.send_message(chat_id, "📅 **Напишіть рік (напр. 2025):**\nАбо надішліть будь-що інше для пошуку за весь час")
         bot.answer_callback_query(call.id)
 
     elif call.data == "repeat":
@@ -149,3 +143,4 @@ def send_recommendation(chat_id):
         bot.send_message(chat_id, "❌ Помилка зв'язку.")
 
 bot.infinity_polling()
+
