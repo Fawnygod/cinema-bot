@@ -9,7 +9,12 @@ TMDB_API_KEY = os.getenv('TMDB_API_KEY')
 
 bot = telebot.TeleBot(TOKEN)
 
-NAMES_MAP = {"movie": "Фільм 🎬", "tv": "Серіал 📺", "anime": "Аніме ⛩"}
+# Карта назв для відображення типу
+NAMES_MAP = {
+    "movie": "Фільм 🎬", 
+    "tv": "Серіал 📺", 
+    "anime": "Аніме ⛩"
+}
 
 GENRES_MAP = {
     "movie": {"Будь-який 🎲": "any", "Бойовик 💥": 28, "Комедія 😂": 35, "Жахи 😱": 27, "Фантастика 🚀": 878},
@@ -32,7 +37,7 @@ def start(message):
         types.InlineKeyboardButton("Серіали 📺", callback_data="type_tv"),
         types.InlineKeyboardButton("Аніме ⛩", callback_data="type_anime")
     )
-    bot.send_message(chat_id, "🎬 **Оберіть категорію:**", parse_mode="Markdown", reply_markup=markup)
+    bot.send_message(chat_id, "🎬 **Що сьогодні подивимось?**", parse_mode="Markdown", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
@@ -43,11 +48,11 @@ def handle_query(call):
         markup = types.InlineKeyboardMarkup(row_width=2)
         btns = [types.InlineKeyboardButton(n, callback_data=f"genre_{g_id}_{n}") for n, g_id in GENRES_MAP[ctype].items()]
         markup.add(*btns)
-        bot.edit_message_text(f"✅ **Обрано:** {NAMES_MAP[ctype]}\n🎭 **Оберіть жанр:**", chat_id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
+        bot.edit_message_text(f"✅ **Ваш вибір:** {NAMES_MAP[ctype]}\n🎭 **Оберіть жанр:**", chat_id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
     elif call.data.startswith("genre_"):
         parts = call.data.split("_")
         user_selection[chat_id]['genre_id'] = None if parts[1] == "any" else parts[1]
-        bot.edit_message_text(f"✅ **Пошук...**", chat_id, call.message.message_id)
+        bot.edit_message_text(f"✅ **Вибір підтверджено!**", chat_id, call.message.message_id)
         send_recommendation(chat_id)
     elif call.data == "repeat":
         send_recommendation(chat_id)
@@ -78,24 +83,31 @@ def send_recommendation(chat_id):
             seen_content.setdefault(chat_id, []).append(m_id)
             title = movie.get('title') or movie.get('name')
             year = (movie.get('release_date') or movie.get('first_air_date') or "----")[:4]
+            overview = movie.get('overview')
 
-            # --- ВИКОРИСТОВУЄМО ВІДКРИТІ ГЕЙТВЕЇ (БЕЗ БЛОКУВАНЬ) ---
-            # Ці домени зазвичай дозволяють перегляд без реєстрації сайту
-            url_1 = f"https://vavada.pro/embed/tmdb/{m_id}"
-            url_2 = f"https://blackvid.org/embed/tmdb/{m_id}"
+            # Пріоритет мови опису
+            if not overview:
+                eng_res = requests.get(f"https://api.themoviedb.org/3/{api_path}/{m_id}?api_key={TMDB_API_KEY}&language=en-US").json()
+                overview = eng_res.get('overview') or "Опис відсутній."
+
+            poster = f"https://image.tmdb.org/t/p/w500{movie['poster_path']}"
+            
+            # Тільки один робочий варіант плеєра
+            watch_url = f"https://vidsrc.pro/embed/{'tv' if data['type'] == 'tv' else 'movie'}/{m_id}"
 
             markup = types.InlineKeyboardMarkup(row_width=1)
-            markup.add(
-                types.InlineKeyboardButton("🇺🇦 Дивитися (Варіант 1)", url=url_1),
-                types.InlineKeyboardButton("🎬 Дивитися (Варіант 2)", url=url_2)
-            )
+            markup.add(types.InlineKeyboardButton("🍿 Дивитися онлайн", url=watch_url))
             markup.row(types.InlineKeyboardButton("🔄 Ще один", callback_data="repeat"),
                        types.InlineKeyboardButton("🎭 Меню", callback_data="change"))
 
-            poster = f"https://image.tmdb.org/t/p/w500{movie['poster_path']}"
-            caption = f"🌟 *{title}* ({year})\n⭐️ Рейтинг: {movie['vote_average']}\n\n📖 {movie.get('overview', '')[:350]}..."
+            caption = (f"🌟 *{title}*\n"
+                       f"🎞 Тип: {NAMES_MAP[data['type']]}\n"
+                       f"⭐️ Рейтинг: {movie['vote_average']}\n"
+                       f"🗓 Рік: {year}\n\n"
+                       f"📖 {overview[:450]}...")
+            
             bot.send_photo(chat_id, poster, caption=caption, parse_mode="Markdown", reply_markup=markup)
     except:
-        bot.send_message(chat_id, "❌ Помилка зв'язку.")
+        bot.send_message(chat_id, "❌ Помилка зв'язку з базою.")
 
 bot.infinity_polling()
