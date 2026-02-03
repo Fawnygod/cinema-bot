@@ -9,7 +9,7 @@ TMDB_API_KEY = os.getenv('TMDB_API_KEY')
 
 bot = telebot.TeleBot(TOKEN)
 
-# Карта назв для відображення типу
+# Карта назв для відображення
 NAMES_MAP = {
     "movie": "Фільм 🎬", 
     "tv": "Серіал 📺", 
@@ -42,28 +42,56 @@ def start(message):
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
     chat_id = call.message.chat.id
+    
+    # 1. ВИБІР ТИПУ
     if call.data.startswith("type_"):
         ctype = call.data.split("_")[1]
         user_selection[chat_id] = {'type': ctype}
+        
         markup = types.InlineKeyboardMarkup(row_width=2)
         btns = [types.InlineKeyboardButton(n, callback_data=f"genre_{g_id}_{n}") for n, g_id in GENRES_MAP[ctype].items()]
         markup.add(*btns)
-        bot.edit_message_text(f"✅ **Ваш вибір:** {NAMES_MAP[ctype]}\n🎭 **Оберіть жанр:**", chat_id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
+        
+        # Відображаємо, що вже вибрано тип
+        text = f"✅ **Ваш вибір:** {NAMES_MAP[ctype]}\n\n🎭 Тепер оберіть жанр:"
+        bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
+
+    # 2. ВИБІР ЖАНРУ
     elif call.data.startswith("genre_"):
         parts = call.data.split("_")
-        user_selection[chat_id]['genre_id'] = None if parts[1] == "any" else parts[1]
-        bot.edit_message_text(f"✅ **Вибір підтверджено!**", chat_id, call.message.message_id)
+        g_id, g_name = parts[1], parts[2]
+        
+        user_selection[chat_id]['genre_id'] = None if g_id == "any" else g_id
+        user_selection[chat_id]['genre_name'] = g_name
+        ctype = user_selection[chat_id]['type']
+        
+        # Відображаємо ПОВНИЙ ЛАНЦЮЖОК вибору
+        final_selection_text = f"✅ **Ваш вибір:** {NAMES_MAP[ctype]} > {g_name}"
+        bot.edit_message_text(final_selection_text, chat_id, call.message.message_id, parse_mode="Markdown")
+        
         send_recommendation(chat_id)
+        bot.answer_callback_query(call.id)
+
     elif call.data == "repeat":
         send_recommendation(chat_id)
+        bot.answer_callback_query(call.id)
     elif call.data == "change":
         start(call.message)
+        bot.answer_callback_query(call.id)
 
 def send_recommendation(chat_id):
     data = user_selection.get(chat_id)
     if not data: return
+    
     api_path = "tv" if data['type'] == "tv" else "movie"
-    params = {'api_key': TMDB_API_KEY, 'sort_by': 'popularity.desc', 'vote_average.gte': 5.5, 'vote_count.gte': 100, 'language': 'uk-UA'}
+    params = {
+        'api_key': TMDB_API_KEY, 
+        'sort_by': 'popularity.desc', 
+        'vote_average.gte': 5.5, 
+        'vote_count.gte': 100, 
+        'language': 'uk-UA'
+    }
+    
     if data.get('genre_id'): params['with_genres'] = data['genre_id']
     if data['type'] == "anime":
         params.update({'with_genres': f"16,{data.get('genre_id', '')}", 'with_original_language': 'ja'})
@@ -75,12 +103,14 @@ def send_recommendation(chat_id):
         params['page'] = random.randint(1, min(res_pages.get('total_pages', 1), 15))
         res = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params).json()
         results = res.get('results', [])
+        
         fresh = [m for m in results if m['id'] not in seen_content.get(chat_id, []) and m.get('poster_path')]
 
         if fresh:
             movie = random.choice(fresh[:5])
             m_id = movie['id']
             seen_content.setdefault(chat_id, []).append(m_id)
+            
             title = movie.get('title') or movie.get('name')
             year = (movie.get('release_date') or movie.get('first_air_date') or "----")[:4]
             overview = movie.get('overview')
@@ -91,8 +121,6 @@ def send_recommendation(chat_id):
                 overview = eng_res.get('overview') or "Опис відсутній."
 
             poster = f"https://image.tmdb.org/t/p/w500{movie['poster_path']}"
-            
-            # Тільки один робочий варіант плеєра
             watch_url = f"https://vidsrc.pro/embed/{'tv' if data['type'] == 'tv' else 'movie'}/{m_id}"
 
             markup = types.InlineKeyboardMarkup(row_width=1)
@@ -100,6 +128,7 @@ def send_recommendation(chat_id):
             markup.row(types.InlineKeyboardButton("🔄 Ще один", callback_data="repeat"),
                        types.InlineKeyboardButton("🎭 Меню", callback_data="change"))
 
+            # ФОРМУЄМО ПОВНУ КАРТКУ (Рік, Тип, Опис повернуто!)
             caption = (f"🌟 *{title}*\n"
                        f"🎞 Тип: {NAMES_MAP[data['type']]}\n"
                        f"⭐️ Рейтинг: {movie['vote_average']}\n"
@@ -108,6 +137,6 @@ def send_recommendation(chat_id):
             
             bot.send_photo(chat_id, poster, caption=caption, parse_mode="Markdown", reply_markup=markup)
     except:
-        bot.send_message(chat_id, "❌ Помилка зв'язку з базою.")
+        bot.send_message(chat_id, "❌ Помилка зв'язку.")
 
 bot.infinity_polling()
