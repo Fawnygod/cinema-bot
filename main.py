@@ -11,7 +11,6 @@ bot = telebot.TeleBot(TOKEN)
 
 NAMES_MAP = {"movie": "Фільм 🎬", "tv": "Серіал 📺", "anime": "Аніме ⛩"}
 
-# Жанри
 GENRES_MAP = {
     "movie": {"Будь-який 🎲": "any", "Бойовик 💥": 28, "Комедія 😂": 35, "Жахи 😱": 27, "Фантастика 🚀": 878, "Драма 🎭": 18},
     "tv": {"Будь-який 🎲": "any", "Детектив 🕵️‍♂️": 80, "Комедія 😂": 35, "Фентезі 🧙‍♂️": 10765, "Пригоди 🧭": 10759},
@@ -33,12 +32,11 @@ def start(message):
         types.InlineKeyboardButton("Серіали 📺", callback_data="type_tv"),
         types.InlineKeyboardButton("Аніме ⛩", callback_data="type_anime")
     )
-    bot.send_message(chat_id, "🎬 **Вітаю! Оберіть категорію:**", parse_mode="Markdown", reply_markup=markup)
+    bot.send_message(chat_id, "🎬 **Оберіть категорію:**", parse_mode="Markdown", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
     chat_id = call.message.chat.id
-    
     if call.data.startswith("type_"):
         ctype = call.data.split("_")[1]
         user_selection[chat_id] = {'type': ctype}
@@ -50,7 +48,7 @@ def handle_query(call):
     elif call.data.startswith("genre_"):
         parts = call.data.split("_")
         user_selection[chat_id]['genre_id'] = None if parts[1] == "any" else parts[1]
-        bot.edit_message_text(f"✅ **Пошук активовано!**", chat_id, call.message.message_id)
+        bot.edit_message_text(f"✅ **Пошук...**", chat_id, call.message.message_id)
         send_recommendation(chat_id)
 
     elif call.data == "repeat":
@@ -64,8 +62,8 @@ def send_recommendation(chat_id):
 
     api_path = "tv" if data['type'] == "tv" else "movie"
     params = {'api_key': TMDB_API_KEY, 'sort_by': 'popularity.desc', 'vote_average.gte': 5.5, 'vote_count.gte': 100, 'language': 'uk-UA'}
-
     if data.get('genre_id'): params['with_genres'] = data['genre_id']
+    
     if data['type'] == "anime":
         params.update({'with_genres': f"16,{data.get('genre_id', '')}", 'with_original_language': 'ja'})
         api_path = "movie"
@@ -81,28 +79,28 @@ def send_recommendation(chat_id):
 
         if fresh:
             movie = random.choice(fresh[:5])
-            seen_content.setdefault(chat_id, []).append(movie['id'])
+            m_id = movie['id']
+            seen_content.setdefault(chat_id, []).append(m_id)
             title = movie.get('title') or movie.get('name')
             year = (movie.get('release_date') or movie.get('first_air_date') or "----")[:4]
-            
-            # --- КНОПКИ ПРЯМОГО ПОШУКУ ПО УКРАЇНСЬКИХ САЙТАХ ---
-            # Формуємо запити для пошуку безпосередньо всередині сайтів
-            query = title.replace(' ', '+')
-            url_uakino = f"https://uakino.best/index.php?do=search&subaction=search&story={query}"
-            url_eneyida = f"https://eneyida.tv/index.php?do=search&subaction=search&story={query}"
-            url_google = f"https://www.google.com/search?q={query}+{year}+дивитися+онлайн+українською"
+
+            # --- ПЛЕЄРИ (Kodik, Ashdi, HDVB через агрегатори) ---
+            # Використовуємо відомі публічні гейтвеї для цих балансерів
+            url_ashdi = f"https://ashdi.vip/tmdb/{m_id}"
+            url_kodik = f"https://kodik.info/find-player?tmdb_id={m_id}"
+            url_hdvb = f"https://api.mult-box.com/embed/tmdb/{m_id}"
 
             markup = types.InlineKeyboardMarkup(row_width=1)
             markup.add(
-                types.InlineKeyboardButton("🍿 Знайти на UAKino", url=url_uakino),
-                types.InlineKeyboardButton("🎬 Знайти на Eneyida", url=url_eneyida),
-                types.InlineKeyboardButton("🔍 Пошук в Google (UA)", url=url_google)
+                types.InlineKeyboardButton("🇺🇦 Дивитися (Ashdi - Пріоритет UA)", url=url_ashdi),
+                types.InlineKeyboardButton("🎬 Дивитися (Kodik - Мультимовний)", url=url_kodik),
+                types.InlineKeyboardButton("📀 Дивитися (HDVB)", url=url_hdvb)
             )
             markup.row(types.InlineKeyboardButton("🔄 Ще один", callback_data="repeat"),
                        types.InlineKeyboardButton("🎭 Меню", callback_data="change"))
 
             poster = f"https://image.tmdb.org/t/p/w500{movie['poster_path']}"
-            caption = f"🌟 *{title}*\n🗓 Рік: {year}\n⭐️ Рейтинг: {movie['vote_average']}\n\n📖 {movie.get('overview', 'Опис українською додається...')[:350]}..."
+            caption = f"🌟 *{title}* ({year})\n⭐️ Рейтинг: {movie['vote_average']}\n\n📖 {movie.get('overview', '')[:350]}..."
             bot.send_photo(chat_id, poster, caption=caption, parse_mode="Markdown", reply_markup=markup)
     except:
         bot.send_message(chat_id, "❌ Помилка зв'язку.")
