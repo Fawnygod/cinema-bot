@@ -12,8 +12,8 @@ bot = telebot.TeleBot(TOKEN)
 NAMES_MAP = {"movie": "Фільм 🎬", "tv": "Серіал 📺", "anime": "Аніме ⛩"}
 
 GENRES_MAP = {
-    "movie": {"Будь-який 🎲": "any", "Бойовик 💥": 28, "Комедія 😂": 35, "Жахи 😱": 27, "Фантастика 🚀": 878, "Драма 🎭": 18},
-    "tv": {"Будь-який 🎲": "any", "Детектив 🕵️‍♂️": 80, "Комедія 😂": 35, "Фентезі 🧙‍♂️": 10765, "Пригоди 🧭": 10759},
+    "movie": {"Будь-який 🎲": "any", "Бойовик 💥": 28, "Комедія 😂": 35, "Жахи 😱": 27, "Фантастика 🚀": 878},
+    "tv": {"Будь-який 🎲": "any", "Детектив 🕵️‍♂️": 80, "Комедія 😂": 35, "Фентезі 🧙‍♂️": 10765},
     "anime": {"Будь-який 🎲": "any", "Екшн ⚔️": 28, "Пригоди 🗺️": 12, "Фентезі 🔮": 14}
 }
 
@@ -44,13 +44,11 @@ def handle_query(call):
         btns = [types.InlineKeyboardButton(n, callback_data=f"genre_{g_id}_{n}") for n, g_id in GENRES_MAP[ctype].items()]
         markup.add(*btns)
         bot.edit_message_text(f"✅ **Обрано:** {NAMES_MAP[ctype]}\n🎭 **Оберіть жанр:**", chat_id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
-
     elif call.data.startswith("genre_"):
         parts = call.data.split("_")
         user_selection[chat_id]['genre_id'] = None if parts[1] == "any" else parts[1]
         bot.edit_message_text(f"✅ **Пошук...**", chat_id, call.message.message_id)
         send_recommendation(chat_id)
-
     elif call.data == "repeat":
         send_recommendation(chat_id)
     elif call.data == "change":
@@ -59,11 +57,9 @@ def handle_query(call):
 def send_recommendation(chat_id):
     data = user_selection.get(chat_id)
     if not data: return
-
     api_path = "tv" if data['type'] == "tv" else "movie"
     params = {'api_key': TMDB_API_KEY, 'sort_by': 'popularity.desc', 'vote_average.gte': 5.5, 'vote_count.gte': 100, 'language': 'uk-UA'}
     if data.get('genre_id'): params['with_genres'] = data['genre_id']
-    
     if data['type'] == "anime":
         params.update({'with_genres': f"16,{data.get('genre_id', '')}", 'with_original_language': 'ja'})
         api_path = "movie"
@@ -74,7 +70,6 @@ def send_recommendation(chat_id):
         params['page'] = random.randint(1, min(res_pages.get('total_pages', 1), 15))
         res = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params).json()
         results = res.get('results', [])
-        
         fresh = [m for m in results if m['id'] not in seen_content.get(chat_id, []) and m.get('poster_path')]
 
         if fresh:
@@ -84,17 +79,15 @@ def send_recommendation(chat_id):
             title = movie.get('title') or movie.get('name')
             year = (movie.get('release_date') or movie.get('first_air_date') or "----")[:4]
 
-            # --- ПЛЕЄРИ (Kodik, Ashdi, HDVB через агрегатори) ---
-            # Використовуємо відомі публічні гейтвеї для цих балансерів
-            url_ashdi = f"https://ashdi.vip/tmdb/{m_id}"
-            url_kodik = f"https://kodik.info/find-player?tmdb_id={m_id}"
-            url_hdvb = f"https://api.mult-box.com/embed/tmdb/{m_id}"
+            # --- ВИКОРИСТОВУЄМО ВІДКРИТІ ГЕЙТВЕЇ (БЕЗ БЛОКУВАНЬ) ---
+            # Ці домени зазвичай дозволяють перегляд без реєстрації сайту
+            url_1 = f"https://vavada.pro/embed/tmdb/{m_id}"
+            url_2 = f"https://blackvid.org/embed/tmdb/{m_id}"
 
             markup = types.InlineKeyboardMarkup(row_width=1)
             markup.add(
-                types.InlineKeyboardButton("🇺🇦 Дивитися (Ashdi - Пріоритет UA)", url=url_ashdi),
-                types.InlineKeyboardButton("🎬 Дивитися (Kodik - Мультимовний)", url=url_kodik),
-                types.InlineKeyboardButton("📀 Дивитися (HDVB)", url=url_hdvb)
+                types.InlineKeyboardButton("🇺🇦 Дивитися (Варіант 1)", url=url_1),
+                types.InlineKeyboardButton("🎬 Дивитися (Варіант 2)", url=url_2)
             )
             markup.row(types.InlineKeyboardButton("🔄 Ще один", callback_data="repeat"),
                        types.InlineKeyboardButton("🎭 Меню", callback_data="change"))
