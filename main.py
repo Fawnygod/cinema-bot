@@ -75,47 +75,49 @@ def handle_year_input(message):
 
 def send_recommendation(chat_id):
     data = user_selection.get(chat_id)
-    if not data or 'type' not in data: return
+    if not data: return
 
+    api_path = "tv" if data['type'] == "tv" else "movie"
     target_year = data.get('year')
     is_new = target_year and int(target_year) >= 2025
-    
-    # Визначаємо шлях для аніме (змішуємо movie/tv) чи стандарт
-    if data['type'] == "anime":
-        api_path = random.choice(["movie", "tv"])
-    else:
-        api_path = "tv" if data['type'] == "tv" else "movie"
 
-    base_url = f"https://api.themoviedb.org/3/discover/{api_path}"
-    
-    # Спершу дізнаємося к-сть сторінок для безпечного рандому
-    params = {
+    # 1. Формуємо базові параметри для пошуку
+    base_params = {
         'api_key': TMDB_API_KEY,
         'sort_by': 'popularity.desc',
-        'vote_count.gte': 5 if is_new else 20
+        'vote_count.gte': 5 if is_new else 40 # Поріг голосів
     }
-    
+
     if target_year:
-        params['primary_release_year' if api_path == "movie" else 'first_air_date_year'] = target_year
-    
+        base_params['primary_release_year' if api_path == "movie" else 'first_air_date_year'] = target_year
+
+    if data.get('genre_id'): 
+        base_params['with_genres'] = data['genre_id']
+
+    # Специфіка для аніме/кіно
     if data['type'] == "anime":
-        params['with_genres'] = f"16,{data['genre_id']}" if data.get('genre_id') and data.get('genre_id') != 'any' else "16"
-        params['with_original_language'] = 'ja'
+        base_params['with_genres'] = f"16,{data['genre_id']}" if data.get('genre_id') else "16"
+        base_params['with_original_language'] = 'ja'
+        api_path = "movie"
     else:
-        params['without_genres'] = 16 # ВИКЛЮЧАЄМО АНІМАЦІЮ
-        if data.get('genre_id') and data.get('genre_id') != 'any':
-            params['with_genres'] = data['genre_id']
+        base_params['without_genres'] = 16
 
     try:
-        # Робимо тестовий запит
-        check = requests.get(base_url, params=params).json()
-        total_p = min(check.get('total_pages', 1), 10)
-        params['page'] = random.randint(1, total_p)
+        # ЕТАП А: Дізнаємося скільки всього є сторінок для цього запиту
+        check_res = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=base_params).json()
+        total_pages = check_res.get('total_pages', 1)
         
-        # Фінальний запит
-        res = requests.get(base_url, params=params).json()
+        # Обмежуємо пошук (не більше 20 сторінок, щоб не лізти в зовсім низькосортне кіно)
+        max_page_limit = min(total_pages, 20)
+        
+        # ЕТАП Б: Рандомимо сторінку з наявних
+        base_params['page'] = random.randint(1, max_page_limit)
+        
+        # ЕТАП В: Робимо фінальний запит
+        res = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=base_params).json()
         results = res.get('results', [])
         
+        # Фільтруємо ті, що вже бачили
         fresh = [m for m in results if m['id'] not in seen_content.get(chat_id, []) and m.get('poster_path')]
 
         if fresh:
@@ -125,6 +127,7 @@ def send_recommendation(chat_id):
             title = movie.get('title') or movie.get('name')
             poster = f"https://image.tmdb.org/t/p/w500{movie['poster_path']}"
             
+            # Пошук трейлера
             v_res = requests.get(f"https://api.themoviedb.org/3/{api_path}/{movie['id']}/videos?api_key={TMDB_API_KEY}").json()
             trailer = f"https://www.youtube.com/results?search_query={title.replace(' ', '+')}+трейлер"
             for v in v_res.get('results', []):
@@ -136,11 +139,15 @@ def send_recommendation(chat_id):
             markup.add(types.InlineKeyboardButton("🔄 Ще один", callback_data="repeat"),
                        types.InlineKeyboardButton("🎭 Меню", callback_data="change"))
 
-            bot.send_photo(chat_id, poster, caption=f"🌟 *{title}*\n⭐️ Рейтинг: {movie['vote_average']}\n🗓 Рік: {target_year or 'Всі'}\n\n🎥 [Трейлер]({trailer})", parse_mode="Markdown", reply_markup=markup)
+            caption = f"🌟 *{title}*\n⭐️ Рейтинг: {movie['vote_average']}\n🗓 Рік: {target_year or 'Всі'}\n\n🎥 [Трейлер]({trailer})"
+            bot.send_photo(chat_id, poster, caption=caption, parse_mode="Markdown", reply_markup=markup)
         else:
-            bot.send_message(chat_id, "🔍 Варіанти закінчилися. Спробуйте змінити рік!")
-    except:
-        bot.send_message(chat_id, "❌ Помилка зв'язку.")
+            # Якщо раптом на цій сторінці все бачили, просто кидаємо старт або кажемо спробувати інший рік
+            bot.send_message(chat_id, "🔍 На цій сторінці все переглянуто. Натисніть 'Ще один' або змініть рік.")
+    except Exception as e:
+        print(f"Error: {e}")
+        bot.send_message(chat_id, "❌ Помилка зв'язку з базою.")
 
 bot.infinity_polling()
+
 
