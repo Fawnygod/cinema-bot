@@ -9,12 +9,7 @@ TMDB_API_KEY = os.getenv('TMDB_API_KEY')
 
 bot = telebot.TeleBot(TOKEN)
 
-# Словник для гарного відображення назв
-NAMES_MAP = {
-    "movie": "Фільми 🎬",
-    "tv": "Серіали 📺",
-    "anime": "Аніме ⛩"
-}
+NAMES_MAP = {"movie": "Фільми 🎬", "tv": "Серіали 📺", "anime": "Аніме ⛩"}
 
 GENRES_MAP = {
     "movie": {"Будь-який 🎲": "any", "Бойовик 💥": 28, "Комедія 😂": 35, "Жахи 😱": 27, "Фантастика 🚀": 878},
@@ -47,30 +42,21 @@ def handle_query(call):
         ctype = call.data.split("_")[1]
         user_selection[chat_id] = {'type': ctype}
         
-        # Редагуємо повідомлення, щоб показати вибір типу
         markup = types.InlineKeyboardMarkup(row_width=2)
-        btns = []
-        for name, g_id in GENRES_MAP[ctype].items():
-            btns.append(types.InlineKeyboardButton(name, callback_data=f"genre_{g_id}_{name}"))
+        btns = [types.InlineKeyboardButton(n, callback_data=f"genre_{g_id}_{n}") for n, g_id in GENRES_MAP[ctype].items()]
         markup.add(*btns)
         
         text = f"✅ **Ваш вибір:** {NAMES_MAP[ctype]}\n\n🎭 Тепер оберіть жанр:"
         bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
 
     elif call.data.startswith("genre_"):
-        # Отримуємо ID жанру та його назву з callback_data
         parts = call.data.split("_")
-        g_id = parts[1]
-        g_name = parts[2]
+        g_id, g_name = parts[1], parts[2]
         
         user_selection[chat_id]['genre_id'] = None if g_id == "any" else g_id
         ctype = user_selection[chat_id]['type']
         
-        # Фіксуємо фінальний вибір у чаті
-        final_text = f"✅ **Ваш вибір:** {NAMES_MAP[ctype]} > {g_name}"
-        bot.edit_message_text(final_text, chat_id, call.message.message_id, parse_mode="Markdown")
-        
-        # Надсилаємо рекомендацію окремим повідомленням
+        bot.edit_message_text(f"✅ **Ваш вибір:** {NAMES_MAP[ctype]} > {g_name}", chat_id, call.message.message_id, parse_mode="Markdown")
         send_recommendation(chat_id)
         bot.answer_callback_query(call.id)
 
@@ -88,10 +74,12 @@ def send_recommendation(chat_id):
 
     api_path = "tv" if data['type'] == "tv" else "movie"
     
+    # ПАРАМЕТРИ ФІЛЬТРАЦІЇ: Рейтинг від 5.5 та мінімум 100 голосів
     params = {
         'api_key': TMDB_API_KEY,
         'sort_by': 'popularity.desc',
-        'vote_count.gte': 40,
+        'vote_average.gte': 5.5,
+        'vote_count.gte': 100,
         'language': 'uk-UA'
     }
 
@@ -106,7 +94,7 @@ def send_recommendation(chat_id):
 
     try:
         check_res = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params).json()
-        total_pages = min(check_res.get('total_pages', 1), 20)
+        total_pages = min(check_res.get('total_pages', 1), 15) # Обмежимо 15 сторінками для кращої якості
         
         params['page'] = random.randint(1, total_pages)
         res = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params).json()
@@ -121,7 +109,6 @@ def send_recommendation(chat_id):
             title = movie.get('title') or movie.get('name')
             overview = movie.get('overview')
 
-            # Fallback на англійську мову
             if not overview:
                 eng_res = requests.get(f"https://api.themoviedb.org/3/{api_path}/{movie['id']}?api_key={TMDB_API_KEY}&language=en-US").json()
                 overview = eng_res.get('overview') or "Опис відсутній."
@@ -142,8 +129,8 @@ def send_recommendation(chat_id):
             caption = f"🌟 *{title}*\n⭐️ Рейтинг: {movie['vote_average']}\n\n📖 {overview[:450]}...\n\n🎥 [Трейлер на YouTube]({trailer})"
             bot.send_photo(chat_id, poster, caption=caption, parse_mode="Markdown", reply_markup=markup)
         else:
-            bot.send_message(chat_id, "🔍 Контент закінчився. Спробуйте змінити категорію!")
+            bot.send_message(chat_id, "🔍 Спробуйте змінити категорію або натисніть /start")
     except:
-        bot.send_message(chat_id, "❌ Помилка зв'язку з базою.")
+        bot.send_message(chat_id, "❌ Помилка зв'язку.")
 
 bot.infinity_polling()
