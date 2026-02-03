@@ -4,11 +4,17 @@ from telebot import types
 import random
 import os
 
-# Ключі з налаштувань Railway
 TOKEN = os.getenv('BOT_TOKEN')
 TMDB_API_KEY = os.getenv('TMDB_API_KEY')
 
 bot = telebot.TeleBot(TOKEN)
+
+# Словник для гарного відображення назв
+NAMES_MAP = {
+    "movie": "Фільми 🎬",
+    "tv": "Серіали 📺",
+    "anime": "Аніме ⛩"
+}
 
 GENRES_MAP = {
     "movie": {"Будь-який 🎲": "any", "Бойовик 💥": 28, "Комедія 😂": 35, "Жахи 😱": 27, "Фантастика 🚀": 878},
@@ -40,16 +46,31 @@ def handle_query(call):
     if call.data.startswith("type_"):
         ctype = call.data.split("_")[1]
         user_selection[chat_id] = {'type': ctype}
+        
+        # Редагуємо повідомлення, щоб показати вибір типу
         markup = types.InlineKeyboardMarkup(row_width=2)
-        btns = [types.InlineKeyboardButton(n, callback_data=f"genre_{i}") for n, i in GENRES_MAP[ctype].items()]
+        btns = []
+        for name, g_id in GENRES_MAP[ctype].items():
+            btns.append(types.InlineKeyboardButton(name, callback_data=f"genre_{g_id}_{name}"))
         markup.add(*btns)
-        bot.edit_message_text("🎭 **Оберіть жанр:**", chat_id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
+        
+        text = f"✅ **Ваш вибір:** {NAMES_MAP[ctype]}\n\n🎭 Тепер оберіть жанр:"
+        bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
 
     elif call.data.startswith("genre_"):
-        g_id = call.data.split("_")[1]
-        user_selection[chat_id]['genre_id'] = None if g_id == "any" else g_id
+        # Отримуємо ID жанру та його назву з callback_data
+        parts = call.data.split("_")
+        g_id = parts[1]
+        g_name = parts[2]
         
-        bot.delete_message(chat_id, call.message.message_id)
+        user_selection[chat_id]['genre_id'] = None if g_id == "any" else g_id
+        ctype = user_selection[chat_id]['type']
+        
+        # Фіксуємо фінальний вибір у чаті
+        final_text = f"✅ **Ваш вибір:** {NAMES_MAP[ctype]} > {g_name}"
+        bot.edit_message_text(final_text, chat_id, call.message.message_id, parse_mode="Markdown")
+        
+        # Надсилаємо рекомендацію окремим повідомленням
         send_recommendation(chat_id)
         bot.answer_callback_query(call.id)
 
@@ -71,7 +92,7 @@ def send_recommendation(chat_id):
         'api_key': TMDB_API_KEY,
         'sort_by': 'popularity.desc',
         'vote_count.gte': 40,
-        'language': 'uk-UA' # Спочатку шукаємо українською
+        'language': 'uk-UA'
     }
 
     if data.get('genre_id'): params['with_genres'] = data['genre_id']
@@ -84,11 +105,9 @@ def send_recommendation(chat_id):
         params['without_genres'] = 16
 
     try:
-        # КРОК 1: Рахуємо сторінки
         check_res = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params).json()
         total_pages = min(check_res.get('total_pages', 1), 20)
         
-        # КРОК 2: Рандомимо та отримуємо список
         params['page'] = random.randint(1, total_pages)
         res = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params).json()
         results = res.get('results', [])
@@ -99,18 +118,16 @@ def send_recommendation(chat_id):
             movie = random.choice(fresh[:10])
             seen_content.setdefault(chat_id, []).append(movie['id'])
             
-            # ЛОГІКА ПЕРЕВІРКИ ОПИСУ
             title = movie.get('title') or movie.get('name')
             overview = movie.get('overview')
 
-            # Якщо опису українською немає, робимо запит за англійським
+            # Fallback на англійську мову
             if not overview:
                 eng_res = requests.get(f"https://api.themoviedb.org/3/{api_path}/{movie['id']}?api_key={TMDB_API_KEY}&language=en-US").json()
-                overview = eng_res.get('overview') or "Опис відсутній обома мовами."
+                overview = eng_res.get('overview') or "Опис відсутній."
 
             poster = f"https://image.tmdb.org/t/p/w500{movie['poster_path']}"
             
-            # Трейлер
             v_res = requests.get(f"https://api.themoviedb.org/3/{api_path}/{movie['id']}/videos?api_key={TMDB_API_KEY}").json()
             trailer = f"https://www.youtube.com/results?search_query={title.replace(' ', '+')}+трейлер"
             for v in v_res.get('results', []):
@@ -122,10 +139,10 @@ def send_recommendation(chat_id):
             markup.add(types.InlineKeyboardButton("🔄 Ще один", callback_data="repeat"),
                        types.InlineKeyboardButton("🎭 Меню", callback_data="change"))
 
-            caption = f"🌟 *{title}*\n⭐️ Рейтинг: {movie['vote_average']}\n\n📖 {overview[:500]}...\n\n🎥 [Трейлер на YouTube]({trailer})"
+            caption = f"🌟 *{title}*\n⭐️ Рейтинг: {movie['vote_average']}\n\n📖 {overview[:450]}...\n\n🎥 [Трейлер на YouTube]({trailer})"
             bot.send_photo(chat_id, poster, caption=caption, parse_mode="Markdown", reply_markup=markup)
         else:
-            bot.send_message(chat_id, "🔍 Спробуйте інший жанр або натисніть /start")
+            bot.send_message(chat_id, "🔍 Контент закінчився. Спробуйте змінити категорію!")
     except:
         bot.send_message(chat_id, "❌ Помилка зв'язку з базою.")
 
