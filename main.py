@@ -4,11 +4,13 @@ from telebot import types
 import random
 import os
 
+# Використовуємо змінні оточення для безпеки
 TOKEN = os.getenv('BOT_TOKEN')
 TMDB_API_KEY = os.getenv('TMDB_API_KEY')
 
 bot = telebot.TeleBot(TOKEN)
 
+# Словники для відображення
 NAMES_MAP = {
     "movie": "Фільм 🎬", 
     "tv": "Серіал 📺", 
@@ -21,7 +23,6 @@ GENRES_MAP = {
     "anime": {"Будь-який 🎲": "any", "Екшн ⚔️": 28, "Пригоди 🗺️": 12, "Фентезі 🔮": 14}
 }
 
-# Словник для швидкого перекладу основних країн
 COUNTRIES_ISO = {
     "US": "США 🇺🇸", "UA": "Україна 🇺🇦", "GB": "Велика Британія 🇬🇧", 
     "FR": "Франція 🇫🇷", "DE": "Німеччина 🇩🇪", "JP": "Японія 🇯🇵", 
@@ -49,24 +50,28 @@ def start(message):
 def handle_query(call):
     chat_id = call.message.chat.id
     
+    # 1. Вибір типу контенту
     if call.data.startswith("type_"):
         ctype = call.data.split("_")[1]
         user_selection[chat_id] = {'type': ctype}
+        
         markup = types.InlineKeyboardMarkup(row_width=2)
         btns = [types.InlineKeyboardButton(n, callback_data=f"genre_{g_id}_{n}") for n, g_id in GENRES_MAP[ctype].items()]
         markup.add(*btns)
         
-        # Відображення вибору типу
+        # Відображаємо ПЕРШИЙ крок вибору прямо над кнопками
         text = f"✅ **Ваш вибір:** {NAMES_MAP[ctype]}\n\n🎭 Тепер оберіть жанр:"
         bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
 
+    # 2. Вибір жанру та вивід результату
     elif call.data.startswith("genre_"):
         parts = call.data.split("_")
         g_id, g_name = parts[1], parts[2]
+        
         user_selection[chat_id]['genre_id'] = None if g_id == "any" else g_id
         ctype = user_selection[chat_id]['type']
         
-        # Фіксація повного ланцюжка вибору в чаті
+        # Відображаємо ПОВНИЙ ланцюжок вибору, як ти і хотів
         final_text = f"✅ **Ваш вибір:** {NAMES_MAP[ctype]} > {g_name}"
         bot.edit_message_text(final_text, chat_id, call.message.message_id, parse_mode="Markdown")
         
@@ -116,7 +121,7 @@ def send_recommendation(chat_id):
             title = movie.get('title') or movie.get('name')
             year = (movie.get('release_date') or movie.get('first_air_date') or "----")[:4]
             
-            # Отримання країни (беремо першу зі списку)
+            # Країна
             origin_countries = movie.get('origin_country', [])
             country_code = origin_countries[0] if origin_countries else "Невідомо"
             country_name = COUNTRIES_ISO.get(country_code, country_code)
@@ -134,7 +139,6 @@ def send_recommendation(chat_id):
             markup.row(types.InlineKeyboardButton("🔄 Ще один", callback_data="repeat"),
                        types.InlineKeyboardButton("🎭 Меню", callback_data="change"))
 
-            # Додано рядок Країна
             caption = (f"🌟 *{title}*\n"
                        f"🎞 Тип: {NAMES_MAP[data['type']]}\n"
                        f"⭐️ Рейтинг: {movie['vote_average']}\n"
@@ -144,6 +148,6 @@ def send_recommendation(chat_id):
             
             bot.send_photo(chat_id, poster, caption=caption, parse_mode="Markdown", reply_markup=markup)
     except:
-        bot.send_message(chat_id, "❌ Помилка зв'язку.")
+        bot.send_message(chat_id, "❌ Помилка зв'язку з базою.")
 
 bot.infinity_polling()
