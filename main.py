@@ -9,7 +9,6 @@ TMDB_API_KEY = os.getenv('TMDB_API_KEY')
 
 bot = telebot.TeleBot(TOKEN)
 
-# Словник для гарного відображення назв
 NAMES_MAP = {
     "movie": "Фільм 🎬", 
     "tv": "Серіал 📺", 
@@ -20,6 +19,13 @@ GENRES_MAP = {
     "movie": {"Будь-який 🎲": "any", "Бойовик 💥": 28, "Комедія 😂": 35, "Жахи 😱": 27, "Фантастика 🚀": 878},
     "tv": {"Будь-який 🎲": "any", "Детектив 🕵️‍♂️": 80, "Комедія 😂": 35, "Фентезі 🧙‍♂️": 10765},
     "anime": {"Будь-який 🎲": "any", "Екшн ⚔️": 28, "Пригоди 🗺️": 12, "Фентезі 🔮": 14}
+}
+
+# Словник для швидкого перекладу основних країн
+COUNTRIES_ISO = {
+    "US": "США 🇺🇸", "UA": "Україна 🇺🇦", "GB": "Велика Британія 🇬🇧", 
+    "FR": "Франція 🇫🇷", "DE": "Німеччина 🇩🇪", "JP": "Японія 🇯🇵", 
+    "KR": "Південна Корея 🇰🇷", "IT": "Італія 🇮🇹", "ES": "Іспанія 🇪🇸"
 }
 
 user_selection = {}
@@ -43,28 +49,24 @@ def start(message):
 def handle_query(call):
     chat_id = call.message.chat.id
     
-    # КРОК 1: Вибір типу контенту
     if call.data.startswith("type_"):
         ctype = call.data.split("_")[1]
         user_selection[chat_id] = {'type': ctype}
-        
         markup = types.InlineKeyboardMarkup(row_width=2)
         btns = [types.InlineKeyboardButton(n, callback_data=f"genre_{g_id}_{n}") for n, g_id in GENRES_MAP[ctype].items()]
         markup.add(*btns)
         
-        # Відображаємо ПЕРШИЙ крок вибору
+        # Відображення вибору типу
         text = f"✅ **Ваш вибір:** {NAMES_MAP[ctype]}\n\n🎭 Тепер оберіть жанр:"
         bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
 
-    # КРОК 2: Вибір жанру та фіксація всього шляху
     elif call.data.startswith("genre_"):
         parts = call.data.split("_")
         g_id, g_name = parts[1], parts[2]
-        
         user_selection[chat_id]['genre_id'] = None if g_id == "any" else g_id
         ctype = user_selection[chat_id]['type']
         
-        # ВАЖЛИВО: Відображаємо ПОВНИЙ ланцюжок вибору, як ти і просив
+        # Фіксація повного ланцюжка вибору в чаті
         final_text = f"✅ **Ваш вибір:** {NAMES_MAP[ctype]} > {g_name}"
         bot.edit_message_text(final_text, chat_id, call.message.message_id, parse_mode="Markdown")
         
@@ -92,7 +94,6 @@ def send_recommendation(chat_id):
     }
 
     if data.get('genre_id'): params['with_genres'] = data['genre_id']
-
     if data['type'] == "anime":
         params.update({'with_genres': f"16,{data.get('genre_id', '')}", 'with_original_language': 'ja'})
         api_path = "movie"
@@ -114,35 +115,35 @@ def send_recommendation(chat_id):
             
             title = movie.get('title') or movie.get('name')
             year = (movie.get('release_date') or movie.get('first_air_date') or "----")[:4]
-            overview = movie.get('overview')
+            
+            # Отримання країни (беремо першу зі списку)
+            origin_countries = movie.get('origin_country', [])
+            country_code = origin_countries[0] if origin_countries else "Невідомо"
+            country_name = COUNTRIES_ISO.get(country_code, country_code)
 
+            overview = movie.get('overview')
             if not overview:
                 eng_res = requests.get(f"https://api.themoviedb.org/3/{api_path}/{m_id}?api_key={TMDB_API_KEY}&language=en-US").json()
                 overview = eng_res.get('overview') or "Опис відсутній."
 
             poster = f"https://image.tmdb.org/t/p/w500{movie['poster_path']}"
-            
-            # ВИКОРИСТОВУЄМО ЖИВІ ДОМЕНИ ЗАМІСТЬ МЕРТВИХ
-            url_1 = f"https://vidsrc.pro/embed/{'tv' if data['type'] == 'tv' else 'movie'}/{m_id}"
-            url_2 = f"https://vidsrc.cc/v2/embed/{'tv' if data['type'] == 'tv' else 'movie'}/{m_id}"
+            trailer_url = f"https://www.youtube.com/results?search_query={title.replace(' ', '+')}+трейлер+українською"
 
             markup = types.InlineKeyboardMarkup(row_width=1)
-            markup.add(
-                types.InlineKeyboardButton("🍿 Дивитися (Варіант 1)", url=url_1),
-                types.InlineKeyboardButton("🎬 Дивитися (Варіант 2)", url=url_2)
-            )
+            markup.add(types.InlineKeyboardButton("🎥 Пошук трейлера", url=trailer_url))
             markup.row(types.InlineKeyboardButton("🔄 Ще один", callback_data="repeat"),
                        types.InlineKeyboardButton("🎭 Меню", callback_data="change"))
 
-            # ПОВЕРНУТО ПОВНИЙ ОПИС (Рік, Тип, Рейтинг)
+            # Додано рядок Країна
             caption = (f"🌟 *{title}*\n"
                        f"🎞 Тип: {NAMES_MAP[data['type']]}\n"
                        f"⭐️ Рейтинг: {movie['vote_average']}\n"
-                       f"🗓 Рік: {year}\n\n"
+                       f"🗓 Рік: {year}\n"
+                       f"🌍 Країна: {country_name}\n\n"
                        f"📖 {overview[:450]}...")
             
             bot.send_photo(chat_id, poster, caption=caption, parse_mode="Markdown", reply_markup=markup)
     except:
-        bot.send_message(chat_id, "❌ Помилка зв'язку з базою.")
+        bot.send_message(chat_id, "❌ Помилка зв'язку.")
 
 bot.infinity_polling()
