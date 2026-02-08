@@ -30,7 +30,7 @@ GENRES_MAP = {
 }
 
 user_selection = {}
-seen_content = {}
+seen_content = {} # Зберігається лише до перезавантаження
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -69,24 +69,21 @@ def handle_query(call):
         start(call.message)
 
 def search_until_found(api_path, params, chat_id):
-    """Шукає контент до переможного кінця"""
+    """Шукає контент на глибині до 100 сторінок"""
     attempts = 0
-    max_pages = 20 # Обмежуємо пошук першими 20 сторінками для швидкості
-    
-    while attempts < 15:
+    while attempts < 25:
         res_json = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params).json()
         results = res_json.get('results', [])
         
+        # Перевірка на дублікати та наявність постеру
         filtered = [m for m in results if m.get('poster_path') and m['id'] not in seen_content.get(chat_id, [])]
         
         if filtered:
             return random.choice(filtered), api_path
         
-        # Якщо результатів немає на цій сторінці, обираємо іншу випадкову сторінку
+        # Якщо нічого не підійшло, обираємо іншу випадкову сторінку (до 100-ї)
         total_pages = res_json.get('total_pages', 1)
-        if total_pages > 1:
-            params['page'] = random.randint(1, min(total_pages, max_pages))
-        
+        params['page'] = random.randint(1, min(total_pages, 100))
         attempts += 1
     return None, None
 
@@ -109,19 +106,18 @@ def send_recommendation(chat_id):
     if is_anime:
         params['with_genres'] = f"16,{genre_id}" if genre_id else "16"
         params['with_original_language'] = "ja"
-        # Шукаємо спочатку в TV, потім в Movie
         res_data, final_path = search_until_found("tv", params, chat_id)
         if not res_data:
             res_data, final_path = search_until_found("movie", params, chat_id)
     else:
         api_path = "tv" if data['type'] == "tv" else "movie"
-        # ВИКЛЮЧЕННЯ МУЛЬТФІЛЬМІВ/АНІМЕ
-        if genre_id == "16": # Якщо обрано жанр мультфільм/мультсеріал
+        # Логіка мультфільмів: тільки якщо обрано жанр 16
+        if genre_id == "16":
             params['with_genres'] = "16"
         else:
-            params['without_genres'] = "16" # Ховаємо анімацію
+            params['without_genres'] = "16"
         
-        params['without_original_language'] = "ja" # Жорстко ховаємо аніме
+        params['without_original_language'] = "ja" # Заборона аніме у фільмах/серіалах
         
         if genre_id and genre_id != "16":
             params['with_genres'] = genre_id
@@ -129,7 +125,7 @@ def send_recommendation(chat_id):
         res_data, final_path = search_until_found(api_path, params, chat_id)
 
     if not res_data:
-        bot.send_message(chat_id, "❌ На жаль, нічого не знайдено за такими параметрами. Спробуйте інший жанр!")
+        bot.send_message(chat_id, "❌ Нічого не знайдено. Спробуйте змінити жанр!")
         return
 
     m_id = res_data['id']
@@ -161,4 +157,4 @@ def send_recommendation(chat_id):
         bot.send_message(chat_id, "❌ Помилка завантаження даних.")
 
 bot.infinity_polling()
-    
+        
