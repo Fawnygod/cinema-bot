@@ -25,7 +25,7 @@ GENRES_MAP = {
     "anime": {
         "Будь-який 🎲": "any", "Екшн ⚔️": 28, "Пригоди 🗺️": 12, "Фентезі 🔮": 14,
         "Комедія 😂": 35, "Драма 🎭": 18, "Романтика ❤️": 10749, "Психологія 🧠": 9648,
-        "Сай-фай 🤖": 878, "Надприродне 👻": 9648  # Покращено мапінг жанру
+        "Сай-фай 🤖": 878, "Надприродне 👻": 9648
     }
 }
 
@@ -68,18 +68,26 @@ def handle_query(call):
     elif call.data == "change":
         start(call.message)
 
-def get_content(api_path, params, chat_id):
-    """Допоміжна функція для пошуку на декількох сторінках"""
-    for _ in range(3): # Пробуємо до 3 різних випадкових сторінок
-        res = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params).json()
-        results = res.get('results', [])
+def search_until_found(api_path, params, chat_id):
+    """Шукає контент до переможного кінця"""
+    attempts = 0
+    max_pages = 20 # Обмежуємо пошук першими 20 сторінками для швидкості
+    
+    while attempts < 15:
+        res_json = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params).json()
+        results = res_json.get('results', [])
+        
         filtered = [m for m in results if m.get('poster_path') and m['id'] not in seen_content.get(chat_id, [])]
+        
         if filtered:
             return random.choice(filtered), api_path
-        if res.get('total_pages', 1) > 1:
-            params['page'] = random.randint(1, min(res['total_pages'], 20))
-        else:
-            break
+        
+        # Якщо результатів немає на цій сторінці, обираємо іншу випадкову сторінку
+        total_pages = res_json.get('total_pages', 1)
+        if total_pages > 1:
+            params['page'] = random.randint(1, min(total_pages, max_pages))
+        
+        attempts += 1
     return None, None
 
 def send_recommendation(chat_id):
@@ -87,32 +95,44 @@ def send_recommendation(chat_id):
     if not data: return
     
     is_anime = data['type'] == "anime"
-    with_genres = f"16,{data.get('genre_id', '')}" if is_anime and data.get('genre_id') else ("16" if is_anime else data.get('genre_id', ""))
+    genre_id = data.get('genre_id')
     
     params = {
         'api_key': TMDB_API_KEY,
         'sort_by': 'popularity.desc',
         'vote_average.gte': 5.0,
-        'vote_count.gte': 20,
+        'vote_count.gte': 30,
         'language': 'uk-UA',
-        'with_genres': with_genres.strip(','),
-        'with_original_language': 'ja' if is_anime else ""
+        'page': 1
     }
 
-    # ЛОГІКА ПОШУКУ АНІМЕ (TV -> Movie)
     if is_anime:
-        movie_data, final_path = get_content("tv", params, chat_id)
-        if not movie_data:
-            movie_data, final_path = get_content("movie", params, chat_id)
+        params['with_genres'] = f"16,{genre_id}" if genre_id else "16"
+        params['with_original_language'] = "ja"
+        # Шукаємо спочатку в TV, потім в Movie
+        res_data, final_path = search_until_found("tv", params, chat_id)
+        if not res_data:
+            res_data, final_path = search_until_found("movie", params, chat_id)
     else:
         api_path = "tv" if data['type'] == "tv" else "movie"
-        movie_data, final_path = get_content(api_path, params, chat_id)
+        # ВИКЛЮЧЕННЯ МУЛЬТФІЛЬМІВ/АНІМЕ
+        if genre_id == "16": # Якщо обрано жанр мультфільм/мультсеріал
+            params['with_genres'] = "16"
+        else:
+            params['without_genres'] = "16" # Ховаємо анімацію
+        
+        params['without_original_language'] = "ja" # Жорстко ховаємо аніме
+        
+        if genre_id and genre_id != "16":
+            params['with_genres'] = genre_id
 
-    if not movie_data:
-        bot.send_message(chat_id, "❌ Нічого не знайдено. Спробуйте інший жанр!")
+        res_data, final_path = search_until_found(api_path, params, chat_id)
+
+    if not res_data:
+        bot.send_message(chat_id, "❌ На жаль, нічого не знайдено за такими параметрами. Спробуйте інший жанр!")
         return
 
-    m_id = movie_data['id']
+    m_id = res_data['id']
     seen_content.setdefault(chat_id, []).append(m_id)
 
     try:
@@ -141,3 +161,4 @@ def send_recommendation(chat_id):
         bot.send_message(chat_id, "❌ Помилка завантаження даних.")
 
 bot.infinity_polling()
+    
