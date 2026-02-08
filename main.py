@@ -20,7 +20,7 @@ GENRES_MAP = {
     "tv": {
         "Будь-який 🎲": "any", "Детектив 🕵️‍♂️": 80, "Комедія 😂": 35, "Фентезі 🧙‍♂️": 10765,
         "Драма 🎭": 18, "Кримінал ⚖️": 80, "Пригоди 🧭": 10759, "Sci-Fi 🤖": 10765,
-        "Мультсеріал 🐥": 16, "Бойовик ⚔️": 10759, "Трилер ⛓": 80
+        "Мультсеріал 🐥": 16, "Бойовик ⚔️": 10759, "Трилер ⛓️": 80
     },
     "anime": {
         "Будь-який 🎲": "any", "Екшн ⚔️": 28, "Пригоди 🗺️": 12, "Фентезі 🔮": 14,
@@ -49,7 +49,6 @@ def start(message):
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
     chat_id = call.message.chat.id
-    
     if call.data.startswith("type_"):
         ctype = call.data.split("_")[1]
         user_selection[chat_id] = {'type': ctype}
@@ -75,9 +74,7 @@ def send_recommendation(chat_id):
     data = user_selection.get(chat_id)
     if not data: return
     
-    # Визначаємо шлях пошуку
     if data['type'] == "anime":
-        # Для аніме пріоритет на TV (серіали), бо їх більше, але фільми теж у вибірці
         api_path = random.choices(["tv", "movie"], weights=[0.7, 0.3])[0]
         with_genres = f"16,{data.get('genre_id', '')}" if data.get('genre_id') else "16"
         with_lang = "ja"
@@ -90,48 +87,50 @@ def send_recommendation(chat_id):
         'api_key': TMDB_API_KEY,
         'sort_by': 'popularity.desc',
         'vote_average.gte': 5.5,
-        'vote_count.gte': 50, # Трохи знизили поріг голосів для аніме-новинок
+        'vote_count.gte': 50,
         'language': 'uk-UA',
         'with_genres': with_genres,
         'with_original_language': with_lang
     }
 
     try:
-        # Отримуємо список
         res = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params).json()
         results = res.get('results', [])
-        
         filtered = [m for m in results if m.get('poster_path') and m['id'] not in seen_content.get(chat_id, [])]
         
-        # Якщо порожньо, пробуємо іншу сторінку
         if not filtered and res.get('total_pages', 1) > 1:
             params['page'] = random.randint(1, min(res['total_pages'], 10))
             res = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params).json()
             filtered = [m for m in res.get('results', []) if m.get('poster_path')]
 
         if not filtered:
-            bot.send_message(chat_id, "❌ За цими параметрами нічого не знайдено. Спробуйте інший жанр.")
+            bot.send_message(chat_id, "❌ За цими параметрами нічого не знайдено.")
             return
 
         movie_data = random.choice(filtered[:10])
         m_id = movie_data['id']
         seen_content.setdefault(chat_id, []).append(m_id)
 
-        # Отримання детальної інфи для країни
         details = requests.get(f"https://api.themoviedb.org/3/{api_path}/{m_id}?api_key={TMDB_API_KEY}&language=uk-UA").json()
         
         countries = details.get('production_countries', [])
         country_name = countries[0].get('name', "Невідомо") if countries else "Невідомо"
-        
         title = details.get('title') or details.get('name')
         year = (details.get('release_date') or details.get('first_air_date') or "----")[:4]
         rating = round(details.get('vote_average', 0), 1)
         
         poster = f"https://image.tmdb.org/t/p/w500{details['poster_path']}"
+        
+        # ПОСИЛАННЯ
         trailer_url = f"https://www.youtube.com/results?search_query={title.replace(' ', '+')}+трейлер+українською"
+        # Прямий пошук на Rezka
+        rezka_url = f"https://rezka.ag/search/?do=search&subaction=search&q={title.replace(' ', '+')}"
 
         markup = types.InlineKeyboardMarkup(row_width=1)
-        markup.add(types.InlineKeyboardButton("🎥 Пошук трейлера", url=trailer_url))
+        markup.add(
+            types.InlineKeyboardButton("🍿 Дивитися на Rezka", url=rezka_url),
+            types.InlineKeyboardButton("🎥 Пошук трейлера", url=trailer_url)
+        )
         markup.row(types.InlineKeyboardButton("🔄 Ще один", callback_data="repeat"),
                    types.InlineKeyboardButton("🎭 Меню", callback_data="change"))
 
@@ -144,6 +143,6 @@ def send_recommendation(chat_id):
         
         bot.send_photo(chat_id, poster, caption=caption, parse_mode="Markdown", reply_markup=markup)
     except:
-        bot.send_message(chat_id, "❌ Помилка завантаження. Спробуйте ще раз.")
+        bot.send_message(chat_id, "❌ Помилка завантаження.")
 
 bot.infinity_polling()
