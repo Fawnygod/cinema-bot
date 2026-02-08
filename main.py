@@ -11,38 +11,21 @@ bot = telebot.TeleBot(TOKEN)
 
 NAMES_MAP = {"movie": "Фільм 🎬", "tv": "Серіал 📺", "anime": "Аніме ⛩"}
 
-# РОЗШИРЕНІ ЖАНРИ
 GENRES_MAP = {
     "movie": {
-        "Будь-який 🎲": "any", 
-        "Бойовик 💥": 28, 
-        "Комедія 😂": 35, 
-        "Жахи 😱": 27, 
-        "Фантастика 🚀": 878,
-        "Трилер 🔪": 53,
-        "Драма 🎭": 18,
-        "Кримінал ⚖️": 80,
-        "Сімейний 👨‍👩‍👧": 10751,
-        "Мультфільм 🧸": 16
+        "Будь-який 🎲": "any", "Бойовик 💥": 28, "Комедія 😂": 35, "Жахи 😱": 27, 
+        "Фантастика 🚀": 878, "Трилер 🔪": 53, "Драма 🎭": 18, "Кримінал ⚖️": 80, 
+        "Сімейний 👨‍👩‍👧": 10751, "Мультфільм 🧸": 16, "Пригоди 🧭": 12, "Містика 🔮": 9648
     },
     "tv": {
-        "Будь-який 🎲": "any", 
-        "Детектив 🕵️‍♂️": 80, 
-        "Комедія 😂": 35, 
-        "Фентезі 🧙‍♂️": 10765,
-        "Драма 🎭": 18,
-        "Кримінал ⚖️": 80,
-        "Пригоди 🧭": 10759,
-        "Sci-Fi 🤖": 10765
+        "Будь-який 🎲": "any", "Детектив 🕵️‍♂️": 80, "Комедія 😂": 35, "Фентезі 🧙‍♂️": 10765,
+        "Драма 🎭": 18, "Кримінал ⚖️": 80, "Пригоди 🧭": 10759, "Sci-Fi 🤖": 10765,
+        "Мультсеріал 🐥": 16, "Бойовик ⚔️": 10759, "Трилер ⛓": 80
     },
     "anime": {
-        "Будь-який 🎲": "any",
-        "Екшн ⚔️": 28, 
-        "Пригоди 🗺️": 12, 
-        "Фентезі 🔮": 14,
-        "Комедія 😂": 35,
-        "Драма 🎭": 18,
-        "Романтика ❤️": 10749
+        "Будь-який 🎲": "any", "Екшн ⚔️": 28, "Пригоди 🗺️": 12, "Фентезі 🔮": 14,
+        "Комедія 😂": 35, "Драма 🎭": 18, "Романтика ❤️": 10749, "Психологія 🧠": 9648,
+        "Сай-фай 🤖": 878, "Надприродне 👻": 14
     }
 }
 
@@ -92,9 +75,10 @@ def send_recommendation(chat_id):
     data = user_selection.get(chat_id)
     if not data: return
     
-    # Визначаємо шлях пошуку (для аніме випадковий вибір між кіно та тб)
+    # Визначаємо шлях пошуку
     if data['type'] == "anime":
-        api_path = random.choice(["tv", "movie"])
+        # Для аніме пріоритет на TV (серіали), бо їх більше, але фільми теж у вибірці
+        api_path = random.choices(["tv", "movie"], weights=[0.7, 0.3])[0]
         with_genres = f"16,{data.get('genre_id', '')}" if data.get('genre_id') else "16"
         with_lang = "ja"
     else:
@@ -106,28 +90,34 @@ def send_recommendation(chat_id):
         'api_key': TMDB_API_KEY,
         'sort_by': 'popularity.desc',
         'vote_average.gte': 5.5,
-        'vote_count.gte': 100,
+        'vote_count.gte': 50, # Трохи знизили поріг голосів для аніме-новинок
         'language': 'uk-UA',
         'with_genres': with_genres,
         'with_original_language': with_lang
     }
 
     try:
-        res_pages = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params).json()
-        params['page'] = random.randint(1, min(res_pages.get('total_pages', 1), 15))
+        # Отримуємо список
         res = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params).json()
         results = res.get('results', [])
         
         filtered = [m for m in results if m.get('poster_path') and m['id'] not in seen_content.get(chat_id, [])]
+        
+        # Якщо порожньо, пробуємо іншу сторінку
+        if not filtered and res.get('total_pages', 1) > 1:
+            params['page'] = random.randint(1, min(res['total_pages'], 10))
+            res = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params).json()
+            filtered = [m for m in res.get('results', []) if m.get('poster_path')]
+
         if not filtered:
-            bot.send_message(chat_id, "❌ Нічого нового не знайдено за цими параметрами.")
+            bot.send_message(chat_id, "❌ За цими параметрами нічого не знайдено. Спробуйте інший жанр.")
             return
 
-        movie = random.choice(filtered[:10])
-        m_id = movie['id']
+        movie_data = random.choice(filtered[:10])
+        m_id = movie_data['id']
         seen_content.setdefault(chat_id, []).append(m_id)
 
-        # Детальний запит
+        # Отримання детальної інфи для країни
         details = requests.get(f"https://api.themoviedb.org/3/{api_path}/{m_id}?api_key={TMDB_API_KEY}&language=uk-UA").json()
         
         countries = details.get('production_countries', [])
@@ -154,7 +144,6 @@ def send_recommendation(chat_id):
         
         bot.send_photo(chat_id, poster, caption=caption, parse_mode="Markdown", reply_markup=markup)
     except:
-        bot.send_message(chat_id, "❌ Помилка завантаження.")
+        bot.send_message(chat_id, "❌ Помилка завантаження. Спробуйте ще раз.")
 
 bot.infinity_polling()
-        
