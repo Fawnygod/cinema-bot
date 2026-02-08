@@ -15,7 +15,7 @@ bot = telebot.TeleBot(TOKEN)
 user_selection = {}
 seen_content = {}
 
-# --- ОЧИЩЕННЯ ІСТОРІЇ ---
+# --- ОЧИЩЕННЯ ІСТОРІЇ О 00:00 ---
 def clear_history():
     global seen_content
     seen_content = {}
@@ -29,7 +29,7 @@ def run_scheduler():
 
 threading.Thread(target=run_scheduler, daemon=True).start()
 
-# --- СЛОВНИКИ ---
+# --- СЛОВНИКИ ТА ЖАНРИ ---
 NAMES_MAP = {"movie": "Фільм 🎬", "tv": "Серіал 📺", "anime": "Аніме ⛩"}
 GENRES_MAP = {
     "movie": {
@@ -85,10 +85,10 @@ def handle_query(call):
 
 def search_until_found(api_path, params, chat_id):
     attempts = 0
-    while attempts < 30:
+    # Змінено діапазон на 25 сторінок за твоїм запитом
+    while attempts < 25:
         try:
-            # Змінюємо сторінку на кожній спробі для максимального рандому
-            params['page'] = random.randint(1, 100)
+            params['page'] = random.randint(1, 25)
             res = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params, timeout=10)
             results = res.json().get('results', [])
             filtered = [m for m in results if m.get('poster_path') and m['id'] not in seen_content.get(chat_id, [])]
@@ -106,20 +106,13 @@ def send_recommendation(chat_id):
     is_anime = data['type'] == "anime"
     genre_id = data.get('genre_id')
     
-    # ПОВНИЙ РАНДОМ СОРТУВАННЯ ТА ПАРАМЕТРІВ
-    sort_options = ['popularity.desc', 'vote_average.desc', 'revenue.desc', 'vote_count.desc']
-    
     params = {
         'api_key': TMDB_API_KEY,
-        'sort_by': random.choice(sort_options), # Випадкове сортування
-        'vote_average.gte': 5.0,
-        'vote_count.gte': 30,
+        'sort_by': 'popularity.desc',
+        'vote_average.gte': 5.5,
+        'vote_count.gte': 100,
         'language': 'uk-UA'
     }
-
-    # Випадкове обмеження за роком для різноманіття класики та новинок
-    if random.choice([True, False]):
-        params['primary_release_date.lte'] = f"{random.randint(1990, 2023)}-01-01"
 
     if is_anime:
         params['with_genres'] = f"16,{genre_id}" if genre_id else "16"
@@ -135,7 +128,7 @@ def send_recommendation(chat_id):
         res_data, final_path = search_until_found(api_path, params, chat_id)
 
     if not res_data:
-        bot.send_message(chat_id, "❌ Спробуйте ще раз або змініть жанр!")
+        bot.send_message(chat_id, "❌ Нічого не знайдено. Спробуйте змінити жанр!")
         return
 
     m_id = res_data['id']
@@ -163,4 +156,3 @@ def send_recommendation(chat_id):
         bot.send_message(chat_id, "❌ Помилка завантаження.")
 
 bot.infinity_polling()
-    
