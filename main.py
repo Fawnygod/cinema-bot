@@ -12,28 +12,25 @@ TMDB_API_KEY = os.getenv('TMDB_API_KEY')
 
 bot = telebot.TeleBot(TOKEN)
 
-# Словники пам'яті
 user_selection = {}
-seen_content = {} # Тут зберігаються ID фільмів
+seen_content = {}
 
-# --- ЛОГІКА ОЧИЩЕННЯ О 00:00 ---
+# --- ОЧИЩЕННЯ ІСТОРІЇ ---
 def clear_history():
     global seen_content
     seen_content = {}
-    print("🧹 Історію переглядів очищено!")
+    print("🧹 Історію очищено")
 
 def run_scheduler():
     schedule.every().day.at("00:00").do(clear_history)
     while True:
         schedule.run_pending()
-        time.sleep(60)
+        time.sleep(10)
 
-# Запускаємо планувальник у фоновому потоці
 threading.Thread(target=run_scheduler, daemon=True).start()
 
-# --- ВАШ ОСНОВНИЙ КОД БОТА ---
+# --- СЛОВНИКИ ---
 NAMES_MAP = {"movie": "Фільм 🎬", "tv": "Серіал 📺", "anime": "Аніме ⛩"}
-
 GENRES_MAP = {
     "movie": {
         "Будь-який 🎲": "any", "Бойовик 💥": 28, "Комедія 😂": 35, "Жахи 😱": 27, 
@@ -76,13 +73,11 @@ def handle_query(call):
         btns = [types.InlineKeyboardButton(n, callback_data=f"genre_{g_id}_{n}") for n, g_id in GENRES_MAP[ctype].items()]
         markup.add(*btns)
         bot.edit_message_text(f"✅ **Ваш вибір:** {NAMES_MAP[ctype]}\n\n🎭 Тепер оберіть жанр:", chat_id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
-
     elif call.data.startswith("genre_"):
         parts = call.data.split("_")
         user_selection[chat_id]['genre_id'] = None if parts[1] == "any" else parts[1]
         bot.edit_message_text(f"✅ **Ваш вибір:** {NAMES_MAP[user_selection[chat_id]['type']]} > {parts[2]}", chat_id, call.message.message_id, parse_mode="Markdown")
         send_recommendation(chat_id)
-
     elif call.data == "repeat":
         send_recommendation(chat_id)
     elif call.data == "change":
@@ -90,15 +85,19 @@ def handle_query(call):
 
 def search_until_found(api_path, params, chat_id):
     attempts = 0
-    while attempts < 25:
-        res_json = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params).json()
-        results = res_json.get('results', [])
-        filtered = [m for m in results if m.get('poster_path') and m['id'] not in seen_content.get(chat_id, [])]
-        if filtered:
-            return random.choice(filtered), api_path
-        total_pages = res_json.get('total_pages', 1)
-        params['page'] = random.randint(1, min(total_pages, 100))
-        attempts += 1
+    while attempts < 30:
+        try:
+            # Змінюємо сторінку на кожній спробі для максимального рандому
+            params['page'] = random.randint(1, 100)
+            res = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params, timeout=10)
+            results = res.json().get('results', [])
+            filtered = [m for m in results if m.get('poster_path') and m['id'] not in seen_content.get(chat_id, [])]
+            
+            if filtered:
+                return random.choice(filtered), api_path
+            attempts += 1
+        except:
+            attempts += 1
     return None, None
 
 def send_recommendation(chat_id):
@@ -107,10 +106,20 @@ def send_recommendation(chat_id):
     is_anime = data['type'] == "anime"
     genre_id = data.get('genre_id')
     
+    # ПОВНИЙ РАНДОМ СОРТУВАННЯ ТА ПАРАМЕТРІВ
+    sort_options = ['popularity.desc', 'vote_average.desc', 'revenue.desc', 'vote_count.desc']
+    
     params = {
-        'api_key': TMDB_API_KEY, 'sort_by': 'popularity.desc', 
-        'vote_average.gte': 5.0, 'vote_count.gte': 30, 'language': 'uk-UA', 'page': 1
+        'api_key': TMDB_API_KEY,
+        'sort_by': random.choice(sort_options), # Випадкове сортування
+        'vote_average.gte': 5.0,
+        'vote_count.gte': 30,
+        'language': 'uk-UA'
     }
+
+    # Випадкове обмеження за роком для різноманіття класики та новинок
+    if random.choice([True, False]):
+        params['primary_release_date.lte'] = f"{random.randint(1990, 2023)}-01-01"
 
     if is_anime:
         params['with_genres'] = f"16,{genre_id}" if genre_id else "16"
@@ -126,14 +135,14 @@ def send_recommendation(chat_id):
         res_data, final_path = search_until_found(api_path, params, chat_id)
 
     if not res_data:
-        bot.send_message(chat_id, "❌ Нічого не знайдено.")
+        bot.send_message(chat_id, "❌ Спробуйте ще раз або змініть жанр!")
         return
 
     m_id = res_data['id']
     seen_content.setdefault(chat_id, []).append(m_id)
 
     try:
-        details = requests.get(f"https://api.themoviedb.org/3/{final_path}/{m_id}?api_key={TMDB_API_KEY}&language=uk-UA").json()
+        details = requests.get(f"https://api.themoviedb.org/3/{final_path}/{m_id}?api_key={TMDB_API_KEY}&language=uk-UA", timeout=10).json()
         title = details.get('title') or details.get('name')
         year = (details.get('release_date') or details.get('first_air_date') or "----")[:4]
         country = details.get('production_countries', [{}])[0].get('name', "Невідомо")
@@ -154,3 +163,4 @@ def send_recommendation(chat_id):
         bot.send_message(chat_id, "❌ Помилка завантаження.")
 
 bot.infinity_polling()
+    
