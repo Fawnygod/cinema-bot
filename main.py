@@ -11,10 +11,39 @@ bot = telebot.TeleBot(TOKEN)
 
 NAMES_MAP = {"movie": "Фільм 🎬", "tv": "Серіал 📺", "anime": "Аніме ⛩"}
 
+# РОЗШИРЕНІ ЖАНРИ
 GENRES_MAP = {
-    "movie": {"Будь-який 🎲": "any", "Бойовик 💥": 28, "Комедія 😂": 35, "Жахи 😱": 27, "Фантастика 🚀": 878},
-    "tv": {"Будь-який 🎲": "any", "Детектив 🕵️‍♂️": 80, "Комедія 😂": 35, "Фентезі 🧙‍♂️": 10765},
-    "anime": {"Серіали 📺": "anime_tv", "Фільми 🎬": "anime_movie"}
+    "movie": {
+        "Будь-який 🎲": "any", 
+        "Бойовик 💥": 28, 
+        "Комедія 😂": 35, 
+        "Жахи 😱": 27, 
+        "Фантастика 🚀": 878,
+        "Трилер 🔪": 53,
+        "Драма 🎭": 18,
+        "Кримінал ⚖️": 80,
+        "Сімейний 👨‍👩‍👧": 10751,
+        "Мультфільм 🧸": 16
+    },
+    "tv": {
+        "Будь-який 🎲": "any", 
+        "Детектив 🕵️‍♂️": 80, 
+        "Комедія 😂": 35, 
+        "Фентезі 🧙‍♂️": 10765,
+        "Драма 🎭": 18,
+        "Кримінал ⚖️": 80,
+        "Пригоди 🧭": 10759,
+        "Sci-Fi 🤖": 10765
+    },
+    "anime": {
+        "Будь-який 🎲": "any",
+        "Екшн ⚔️": 28, 
+        "Пригоди 🗺️": 12, 
+        "Фентезі 🔮": 14,
+        "Комедія 😂": 35,
+        "Драма 🎭": 18,
+        "Романтика ❤️": 10749
+    }
 }
 
 user_selection = {}
@@ -37,18 +66,19 @@ def start(message):
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
     chat_id = call.message.chat.id
+    
     if call.data.startswith("type_"):
         ctype = call.data.split("_")[1]
         user_selection[chat_id] = {'type': ctype}
         markup = types.InlineKeyboardMarkup(row_width=2)
         btns = [types.InlineKeyboardButton(n, callback_data=f"genre_{g_id}_{n}") for n, g_id in GENRES_MAP[ctype].items()]
         markup.add(*btns)
-        bot.edit_message_text(f"✅ **Ваш вибір:** {NAMES_MAP[ctype]}\n\n🎭 Тепер оберіть жанр/тип:", chat_id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
+        bot.edit_message_text(f"✅ **Ваш вибір:** {NAMES_MAP[ctype]}\n\n🎭 Тепер оберіть жанр:", chat_id, call.message.message_id, parse_mode="Markdown", reply_markup=markup)
 
     elif call.data.startswith("genre_"):
         parts = call.data.split("_")
         g_id, g_name = parts[1], parts[2]
-        user_selection[chat_id]['genre_id'] = g_id
+        user_selection[chat_id]['genre_id'] = None if g_id == "any" else g_id
         ctype = user_selection[chat_id]['type']
         bot.edit_message_text(f"✅ **Ваш вибір:** {NAMES_MAP[ctype]} > {g_name}", chat_id, call.message.message_id, parse_mode="Markdown")
         send_recommendation(chat_id)
@@ -62,14 +92,14 @@ def send_recommendation(chat_id):
     data = user_selection.get(chat_id)
     if not data: return
     
-    # Визначаємо шлях пошуку
+    # Визначаємо шлях пошуку (для аніме випадковий вибір між кіно та тб)
     if data['type'] == "anime":
-        api_path = "tv" if data['genre_id'] == "anime_tv" else "movie"
-        with_genres = "16" # Анімація
-        with_lang = "ja"   # Японія
+        api_path = random.choice(["tv", "movie"])
+        with_genres = f"16,{data.get('genre_id', '')}" if data.get('genre_id') else "16"
+        with_lang = "ja"
     else:
         api_path = "tv" if data['type'] == "tv" else "movie"
-        with_genres = data.get('genre_id') if data.get('genre_id') != "any" else ""
+        with_genres = data.get('genre_id') if data.get('genre_id') else ""
         with_lang = ""
 
     params = {
@@ -88,11 +118,16 @@ def send_recommendation(chat_id):
         res = requests.get(f"https://api.themoviedb.org/3/discover/{api_path}", params=params).json()
         results = res.get('results', [])
         
-        movie = random.choice([m for m in results if m.get('poster_path') and m['id'] not in seen_content.get(chat_id, [])])
+        filtered = [m for m in results if m.get('poster_path') and m['id'] not in seen_content.get(chat_id, [])]
+        if not filtered:
+            bot.send_message(chat_id, "❌ Нічого нового не знайдено за цими параметрами.")
+            return
+
+        movie = random.choice(filtered[:10])
         m_id = movie['id']
         seen_content.setdefault(chat_id, []).append(m_id)
 
-        # ДЕТАЛЬНИЙ ЗАПИТ ДЛЯ КРАЇНИ ТА ПОВНОГО ОПИСУ
+        # Детальний запит
         details = requests.get(f"https://api.themoviedb.org/3/{api_path}/{m_id}?api_key={TMDB_API_KEY}&language=uk-UA").json()
         
         countries = details.get('production_countries', [])
@@ -118,7 +153,8 @@ def send_recommendation(chat_id):
                    f"📖 {details.get('overview', 'Опис відсутній')[:450]}...")
         
         bot.send_photo(chat_id, poster, caption=caption, parse_mode="Markdown", reply_markup=markup)
-    except Exception as e:
-        bot.send_message(chat_id, "❌ Не вдалося знайти щось новеньке. Спробуйте змінити жанр!")
+    except:
+        bot.send_message(chat_id, "❌ Помилка завантаження.")
 
 bot.infinity_polling()
+        
